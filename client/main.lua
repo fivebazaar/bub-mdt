@@ -146,7 +146,7 @@ local function respondToCall()
 end
 
 respondKey = lib.addKeybind({
-    deafultKey = config.defaultRespondKey,
+    deafultKey = 'g',
     description = 'Reponds to call',
     name = 'respondToCall',
     onPressed = respondToCall
@@ -395,7 +395,7 @@ serverNuiCallback('getAllVehicles', function(data, cb)
     for i = 1, #data do
         vehicles[#vehicles+1] = {
             plate = data[i].plate,
-            model = VEHICLES[data[i].vehicle].model,
+            model = data[i].vehicle,
         }
     end
 

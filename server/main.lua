@@ -304,7 +304,8 @@ utils.registerCallback('mdt:setOfficerRoles', function(source, data)
 end)
 
 RegisterServerEvent("mdt:updateProfileImage", function(playerId, image)
-    local player = exports.qbx_core:GetPlayer(playerId)
+    -- local player = exports.qbx_core:GetPlayer(playerId)
+    local player = QBCore.Functions.GetPlayer(playerId)
 
     db.updateProfileImage(player.PlayerData.citizenid, image)
 end)

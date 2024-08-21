@@ -18,7 +18,7 @@ function qb.getOfficerData()
 end
 
 function qb.notify(text, type)
-    exports.qbx_core:Notify(text, type)
+    QBCore.Functions.Notify(text, type)
 end
 
 function qb.isJobPolice()
@@ -30,7 +30,7 @@ function qb.isOnDuty()
 end
 
 function qb.GetVehiclesByName()
-    return exports.qbx_core:GetVehiclesByName()
+    return QBCore.Shared.Vehicles
 end
 
 function qb.getPlayerGender()

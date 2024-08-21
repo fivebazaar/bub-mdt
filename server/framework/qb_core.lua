@@ -6,7 +6,7 @@ local QBCore = exports['qb-core']:GetCoreObject()
 local function addOfficer(playerId)
     if officers.get(playerId) then return end
 
-    local player = exports.qbx_core:GetPlayer(playerId)
+    local player = QBCore.Functions.GetPlayer(playerId)
     if player and player.PlayerData.job.type == 'leo' then
         officers.add(playerId, player.PlayerData.charinfo.firstname, player.PlayerData.charinfo.lastname, player.PlayerData.citizenid)
         MySQL.prepare.await('INSERT INTO `mdt_profiles` (`citizenid`, `image`, `notes`, `lastActive`) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE `lastActive` = NOW()', { player.PlayerData.citizenid, nil, nil })
@@ -222,7 +222,7 @@ function qb.getVehiclesForProfile(parameters)
 end
 
 function qb.getLicenses(citizenid)
-    local player = exports.qbx_core:GetPlayerByCitizenId(citizenid)
+    local player = QBCore.Functions.GetPlayerByCitizenId(citizenid)
     if not player then 
         local result = MySQL.rawExecute.await([[
         SELECT
@@ -439,24 +439,20 @@ local selectOfficers = [[
     SELECT
         mdt_profiles.id,
         players.charinfo,
+        players.job,
         players.citizenid,
-        player_groups.group AS `group`,
-        player_groups.grade,
         mdt_profiles.image,
         mdt_profiles.callSign
     FROM
-        player_groups
-    LEFT JOIN
         players
-    ON
-        player_groups.citizenid = players.citizenid
     LEFT JOIN
         mdt_profiles
     ON
         players.citizenid = mdt_profiles.citizenid
     WHERE
-        player_groups.group IN ("police")
+        JSON_EXTRACT(players.job, '$.name') = 'police'
 ]]
+
 
 function qb.getOfficers()
     local query = selectOfficers
@@ -479,10 +475,9 @@ end
 local selectOfficersForRoster = [[
     SELECT
         mdt_profiles.id,
+        players.job,
         players.charinfo,
         players.citizenid,
-        player_groups.group AS `group`,
-        player_groups.grade,
         mdt_profiles.image,
         mdt_profiles.callSign,
         mdt_profiles.apu,
@@ -492,17 +487,11 @@ local selectOfficersForRoster = [[
         mdt_profiles.fto,
         DATE_FORMAT(mdt_profiles.lastActive, "%Y-%m-%d %T") AS formatted_lastActive
     FROM
-        player_groups
-    LEFT JOIN
         players
-    ON
-        player_groups.citizenid = players.citizenid
     LEFT JOIN
         mdt_profiles
     ON
         players.citizenid = mdt_profiles.citizenid
-    WHERE
-        player_groups.group IN ("police")
 ]]
 
 utils.registerCallback('mdt:fetchRoster', function()
@@ -510,24 +499,26 @@ utils.registerCallback('mdt:fetchRoster', function()
     local queryResult = MySQL.rawExecute.await(query)
     local rosterOfficers = {}
 
-    local job = exports.qbx_core:GetJob('police')
-
     for _, v in pairs(queryResult) do
+        local job = json.decode(v.job)        
         local charinfo = json.decode(v.charinfo)
-        rosterOfficers[#rosterOfficers+1] = {
-            citizenid = v.citizenid,
-            firstname = charinfo.firstname,
-            lastname = charinfo.lastname,
-            callsign = v.callSign,
-            image = v.image,
-            title = job.grades[v.grade].name,
-            apu = v.apu,
-            air = v.air,
-            mc = v.mc,
-            k9 = v.k9,
-            fto = v.fto,
-            lastActive = v.formatted_lastActive
-        }
+        -- Ensure the job is police before adding to the roster
+        if job.name == 'police' then
+            rosterOfficers[#rosterOfficers+1] = {
+                citizenid = v.citizenid,
+                firstname = charinfo.firstname,
+                lastname = charinfo.lastname,
+                callsign = v.callSign,
+                image = v.image,
+                title = QBCore.Shared.Jobs[job.name].grades,
+                apu = v.apu,
+                air = v.air,
+                mc = v.mc,
+                k9 = v.k9,
+                fto = v.fto,
+                lastActive = v.formatted_lastActive
+            }
+        end
     end
     
     return rosterOfficers
@@ -591,7 +582,8 @@ local selectVehicle = [[
 
 function qb.getVehicle(plate)
     local response = MySQL.rawExecute.await(selectVehicle, {plate})?[1]
-    local player = exports.qbx_core:GetPlayerByCitizenId(response.citizenid)
+    print(response.citizenid)
+    local player = QBCore.Functions.GetPlayerByCitizenId(response.citizenid)
     local data = {
         plate = response.plate,
         vehicle = response.vehicle,
@@ -606,7 +598,14 @@ function qb.getVehicle(plate)
 end
 
 utils.registerCallback('mdt:hireOfficer', function(source, data)
-    exports.qbx_core:AddPlayerToJob(data.citizenid, 'police', 1)
+    -- exports.qbx_core:AddPlayerToJob(data.citizenid, 'police', 1)
+    local player
+    if QBCore.Functions.GetPlayerByCitizenId(data.citizenid) then
+        player = QBCore.Functions.GetPlayerByCitizenId(data.citizenid)
+    else
+        player = QBCore.Player.GetOfflinePlayer(data.citizenid)
+    end
+    player.Functions.SetJob('police', 1)
 
     local success = MySQL.prepare.await('INSERT INTO `mdt_profiles` (`citizenid`, `callsign`, `lastActive`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `callsign` = ?, `lastActive` = ?', { data.citizenid, data.callsign, os.date("%Y-%m-%d %H:%M:%S"), data.callsign, os.date("%Y-%m-%d %H:%M:%S") })
 
@@ -614,14 +613,29 @@ utils.registerCallback('mdt:hireOfficer', function(source, data)
 end)
 
 utils.registerCallback('mdt:fireOfficer', function(source, data)
-    exports.qbx_core:RemovePlayerFromJob(data, 'police')
+    -- exports.qbx_core:RemovePlayerFromJob(data, 'police')
+    local player
+    if QBCore.Functions.GetPlayerByCitizenId(data.citizenid) then
+        player = QBCore.Functions.GetPlayerByCitizenId(data.citizenid)
+    else
+        player = QBCore.Player.GetOfflinePlayer(data.citizenid)
+    end
+    player.Functions.SetJob('unemployed', 0)
     MySQL.prepare.await('UPDATE `mdt_profiles` SET `callsign` = ? WHERE `citizenid` = ?', { nil, data })
 
     return true
 end)
 
 utils.registerCallback('mdt:setOfficerRank', function(source, data)
-    exports.qbx_core:AddPlayerToJob(data.citizenId, 'police', data.grade)
+    -- exports.qbx_core:AddPlayerToJob(data.citizenId, 'police', data.grade)
+
+    local player
+    if QBCore.Functions.GetPlayerByCitizenId(data.citizenId) then
+        player = QBCore.Functions.GetPlayerByCitizenId(data.citizenId)
+    else
+        player = QBCore.Player.GetOfflinePlayer(data.citizenId)
+    end
+    player.Functions.SetJob('police', data.grade)
 
     return true
 end)
